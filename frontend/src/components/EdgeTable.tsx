@@ -1,4 +1,5 @@
 import type { EdgeRow } from "../types";
+import { fmt } from "../json";
 
 export function EdgeTable({ rows }: { rows: EdgeRow[] }) {
   return (
@@ -25,7 +26,7 @@ export function EdgeTable({ rows }: { rows: EdgeRow[] }) {
               <td>
                 {r.source} → {r.target}
               </td>
-              <td className="num">{r.delay}</td>
+              <td className="num">{fmt(r.delay)}</td>
               <td className="num">{r.cap}</td>
               <td className="num strong" data-chosen={r.id}>
                 {r.chosen}

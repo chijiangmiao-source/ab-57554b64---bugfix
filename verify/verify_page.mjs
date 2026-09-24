@@ -25,6 +25,9 @@ function check(name, cond, detail = "") {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Bodies of POST requests the page actually sends (request-direction probe).
+const sentBodies = [];
+
 async function waitFor(predicate, { timeout = 15000, label = "" } = {}) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
@@ -56,8 +59,11 @@ async function bootDom() {
     pretendToBeVisual: true,
     beforeParse(window) {
       // Same-origin browser fetch routed through Node's real fetch -> nginx.
-      window.fetch = (url, init) =>
-        globalThis.fetch(new URL(url, WEB).toString(), init);
+      window.fetch = (url, init) => {
+        if (init && String(init.method ?? "GET").toUpperCase() === "POST")
+          sentBodies.push(String(init.body ?? ""));
+        return globalThis.fetch(new URL(url, WEB).toString(), init);
+      };
     },
   });
   const { window } = dom;
@@ -77,6 +83,18 @@ async function bootDom() {
 
 const $ = (w, sel) => w.document.querySelector(sel);
 const $$ = (w, sel) => Array.from(w.document.querySelectorAll(sel));
+
+// Set the controlled textarea's value the way a real user's edit would
+// (native setter + bubbling input event so React picks it up).
+function setBatchInput(w, text) {
+  const textarea = $(w, '[data-testid="batch-input"]');
+  const setter = Object.getOwnPropertyDescriptor(
+    w.HTMLTextAreaElement.prototype, "value"
+  ).set;
+  setter.call(textarea, text);
+  textarea.dispatchEvent(new w.Event("input", { bubbles: true }));
+  return textarea;
+}
 
 async function loadSampleAndSubmit(w, buttonText) {
   const btn = $$(w, "button").find((b) => b.textContent.trim() === buttonText);
@@ -169,13 +187,8 @@ async function main() {
 
   // ---- D. failed validation must preserve the input ---------------------
   console.log("D. 校验/请求失败后页面保留输入");
-  const textarea = $(w, '[data-testid="batch-input"]');
-  const setter = Object.getOwnPropertyDescriptor(
-    w.HTMLTextAreaElement.prototype, "value"
-  ).set;
   const badText = '{"nodes":["R"] ,"edges":[],"windows":[]}';
-  setter.call(textarea, badText);
-  textarea.dispatchEvent(new w.Event("input", { bubbles: true }));
+  const textarea = setBatchInput(w, badText);
   $(w, '[data-testid="submit"]').click();
   await waitFor(
     () => $(w, '[data-testid="error-banner"]')?.textContent.includes("422"),
@@ -188,14 +201,68 @@ async function main() {
 
   // Malformed JSON: purely client-side, still kept verbatim.
   const malformed = badText + "}}not json";
-  setter.call(textarea, malformed);
-  textarea.dispatchEvent(new w.Event("input", { bubbles: true }));
+  setBatchInput(w, malformed);
   $(w, '[data-testid="submit"]').click();
   await waitFor(
     () => $(w, '[data-testid="error-banner"]')?.textContent.includes("JSON"),
     { label: "JSON 错误提示" }
   );
   check("JSON 解析失败后输入同样保留", textarea.value === malformed);
+
+  // ---- E. big integers survive the real submit path losslessly ----------
+  console.log("E. 大整数批次经真实提交路径无损往返");
+  // 2^53 + 1: not representable as a JS double. Built as TEXT — a numeric
+  // literal in this script would already be rounded before the page sees it.
+  const BIG = "9007199254740993";
+  const BIG_OFF = "9007199254740992";
+  const bigText = [
+    "{",
+    '  "nodes": ["R", "L1", "L2"],',
+    '  "edges": [',
+    `    {"id": "a", "source": "R", "target": "L1", "delay": ${BIG}, "cap": 0},`,
+    '    {"id": "b", "source": "R", "target": "L2", "delay": 0, "cap": 0}',
+    "  ],",
+    '  "windows": [',
+    `    {"node": "L1", "lo": ${BIG}, "hi": ${BIG}},`,
+    '    {"node": "L2", "lo": 0, "hi": 0}',
+    "  ]",
+    "}",
+  ].join("\n");
+  const bigArea = setBatchInput(w, bigText);
+  $(w, '[data-testid="submit"]').click();
+  await waitFor(
+    () => $(w, '[data-leaf-arrival="L1"]'),
+    { label: "大整数批次叶端表" }
+  );
+  // Request direction: the page must have POSTed the exact integer.
+  const lastBody = sentBodies[sentBodies.length - 1] ?? "";
+  check("请求方向: 提交体原样携带 delay=9007199254740993",
+    lastBody.includes(`"delay":${BIG}`), lastBody);
+  check("请求方向: 提交体不含被改写的 9007199254740992",
+    !lastBody.includes(BIG_OFF), lastBody);
+  // Response direction: exact rendering of arrival / window / delay.
+  const l1Arrival = $(w, '[data-leaf-arrival="L1"]')?.textContent.trim();
+  check("叶端表 L1 到达值为 9007199254740993",
+    l1Arrival === BIG, l1Arrival);
+  check("叶端表 L1 到达值不是相邻的 9007199254740992",
+    l1Arrival !== BIG_OFF, l1Arrival);
+  check("叶端表 L2 到达值为 0",
+    $(w, '[data-leaf-arrival="L2"]')?.textContent.trim() === "0");
+  check("树表 L1 到达值精确",
+    $(w, '[data-arrival="L1"]')?.textContent.trim() === BIG);
+  const leafRowL1 = $(w, 'tr[data-leaf-row="L1"]')?.textContent.replace(/\s+/g, "");
+  check("叶端表 L1 要求窗口与可达区间精确显示大整数",
+    leafRowL1?.includes(`[${BIG},${BIG}]`), leafRowL1);
+  const treeRowL1 = $(w, 'tr[data-node="L1"]')?.textContent.replace(/\s+/g, "");
+  check("树表 L1 行固有延迟与窗口精确显示大整数",
+    !!treeRowL1 && treeRowL1.includes(BIG) && treeRowL1.includes(`[${BIG},${BIG}]`),
+    treeRowL1);
+  check("边表 a 行固有延迟精确显示大整数",
+    $(w, 'tr[data-edge="a"]')?.textContent.replace(/\s+/g, "").includes(BIG));
+  check("大整数批次无校验错误提示",
+    !$(w, '[data-testid="error-banner"]'));
+  check("提交后输入区仍原样保留大整数文本",
+    bigArea.value === bigText, bigArea.value.slice(0, 120));
 
   console.log(`\n页面核对: ${failures} 项失败`);
   process.exit(failures ? 1 : 0);

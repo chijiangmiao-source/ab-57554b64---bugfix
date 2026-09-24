@@ -2,6 +2,7 @@
 # One-shot verification entrypoint. Runs, in order:
 #   1. backend unit tests
 #   2. frontend production build
+#   2b. frontend lossless-JSON unit tests (big-integer parse/serialize)
 #   3. HTTP smoke (api health, web index, proxied health)
 #   4. scenario checks against the REAL api
 #   5. scenario checks against the REAL built page
@@ -57,6 +58,16 @@ frontend_build() {
     --outfile=dist/verify-bundle.js
 }
 run_stage "前端生产构建 (vite build + 验证包)" frontend_build
+
+# 2b. frontend unit tests: lossless JSON big-integer parse/serialize
+frontend_json_tests() {
+  cd "$ROOT/frontend" || return 1
+  node_modules/.bin/esbuild tests/json.test.ts \
+    --bundle --platform=node --format=cjs \
+    --outfile=dist/json.test.cjs >/dev/null || return 1
+  node --test dist/json.test.cjs
+}
+run_stage "前端大整数 JSON 单元测试 (node --test)" frontend_json_tests
 
 # Services must be up before smoke/scenario stages.
 wait_for "$API_URL/health" || exit 1

@@ -341,3 +341,63 @@ def test_api_bad_type_422():
     p["edges"][0]["cap"] = 99
     r = client.post("/api/v1/solve", json=p)
     assert r.status_code == 422
+
+
+BIG = 9007199254740993  # 2^53 + 1: beyond JavaScript's safe integers
+
+
+def big_payload():
+    # The regression batch: R -> L1 (delay/window = 2^53+1), R -> L2 (zeros).
+    return {
+        "nodes": ["R", "L1", "L2"],
+        "edges": [
+            {"id": "a", "source": "R", "target": "L1", "delay": BIG, "cap": 0},
+            {"id": "b", "source": "R", "target": "L2", "delay": 0, "cap": 0},
+        ],
+        "windows": [
+            {"node": "L1", "lo": BIG, "hi": BIG},
+            {"node": "L2", "lo": 0, "hi": 0},
+        ],
+    }
+
+
+def test_api_big_integers_exact():
+    # Raw JSON text so the exact digits (not a rounded double) hit the wire.
+    body = (
+        '{"nodes": ["R", "L1", "L2"],'
+        ' "edges": ['
+        f'  {{"id": "a", "source": "R", "target": "L1", "delay": {BIG}, "cap": 0}},'
+        '   {"id": "b", "source": "R", "target": "L2", "delay": 0, "cap": 0}],'
+        ' "windows": ['
+        f'  {{"node": "L1", "lo": {BIG}, "hi": {BIG}}},'
+        '   {"node": "L2", "lo": 0, "hi": 0}]}'
+    )
+    r = client.post(
+        "/api/v1/solve", content=body, headers={"Content-Type": "application/json"}
+    )
+    assert r.status_code == 200, r.text
+    # Wire format carries the exact integer, not the rounded neighbor.
+    assert str(BIG) in r.text
+    assert "9007199254740992" not in r.text
+    data = r.json()
+    assert data["status"] == "feasible"
+    arrivals = {x["node"]: x["arrival"] for x in data["leaves"]}
+    assert arrivals == {"L1": BIG, "L2": 0}
+    leaf = {x["node"]: x for x in data["leaves"]}["L1"]
+    assert (leaf["lo"], leaf["hi"]) == (BIG, BIG)
+    assert (leaf["reachable_low"], leaf["reachable_high"]) == (BIG, BIG)
+    edge = {x["id"]: x for x in data["edges"]}["a"]
+    assert edge["delay"] == BIG
+    tree = {x["node"]: x for x in data["tree"]["rows"]}
+    assert tree["L1"]["arrival"] == BIG
+    assert tree["L1"]["edge_delay"] == BIG
+    assert (tree["L1"]["window"]["lo"], tree["L1"]["window"]["hi"]) == (BIG, BIG)
+
+
+def test_solver_big_integers_exact():
+    p = big_payload()
+    edges = [E(e["id"], e["source"], e["target"], e["delay"], e["cap"]) for e in p["edges"]]
+    windows = [W(w["node"], w["lo"], w["hi"]) for w in p["windows"]]
+    r = solve(build_model(p["nodes"], edges, windows))
+    assert r["status"] == "feasible"
+    assert {x["node"]: x["arrival"] for x in r["leaves"]} == {"L1": BIG, "L2": 0}

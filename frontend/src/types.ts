@@ -1,15 +1,18 @@
+import type { JsonInt } from "./json";
+
 export interface EdgeIn {
   id: string;
   source: string;
   target: string;
-  delay: number;
+  // No JS safe-integer bound: may decode as BigInt.
+  delay: JsonInt;
   cap: number;
 }
 
 export interface WindowIn {
   node: string;
-  lo: number;
-  hi: number;
+  lo: JsonInt;
+  hi: JsonInt;
 }
 
 export interface Batch {
@@ -30,21 +33,21 @@ export interface TreeRow {
   depth: number;
   is_leaf: boolean;
   parent_edge: string | null;
-  edge_delay: number | null;
+  edge_delay: JsonInt | null;
   edge_cap: number | null;
   compensation: number | null;
-  arrival: number;
-  window: { lo: number; hi: number } | null;
-  margin: number | null;
-  margin_low: number | null;
-  margin_high: number | null;
+  arrival: JsonInt;
+  window: { lo: JsonInt; hi: JsonInt } | null;
+  margin: JsonInt | null;
+  margin_low: JsonInt | null;
+  margin_high: JsonInt | null;
 }
 
 export interface EdgeRow {
   id: string;
   source: string;
   target: string;
-  delay: number;
+  delay: JsonInt;
   cap: number;
   adjustable: boolean;
   chosen: number;
@@ -54,22 +57,22 @@ export interface EdgeRow {
 
 export interface LeafRow {
   node: string;
-  arrival: number;
-  lo: number;
-  hi: number;
-  margin: number;
-  margin_low: number;
-  margin_high: number;
-  reachable_low: number;
-  reachable_high: number;
+  arrival: JsonInt;
+  lo: JsonInt;
+  hi: JsonInt;
+  margin: JsonInt;
+  margin_low: JsonInt;
+  margin_high: JsonInt;
+  reachable_low: JsonInt;
+  reachable_high: JsonInt;
 }
 
 export interface ConflictLeaf {
   node: string;
-  lo: number;
-  hi: number;
-  reachable_low: number;
-  reachable_high: number;
+  lo: JsonInt;
+  hi: JsonInt;
+  reachable_low: JsonInt;
+  reachable_high: JsonInt;
 }
 
 export interface SolveResult {

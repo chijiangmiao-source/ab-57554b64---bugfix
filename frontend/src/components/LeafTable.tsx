@@ -1,4 +1,5 @@
 import type { LeafRow } from "../types";
+import { fmt, isZero } from "../json";
 
 export function LeafTable({ rows }: { rows: LeafRow[] }) {
   return (
@@ -20,23 +21,23 @@ export function LeafTable({ rows }: { rows: LeafRow[] }) {
                 <code>{r.node}</code>
               </td>
               <td className="num strong" data-leaf-arrival={r.node}>
-                {r.arrival}
+                {fmt(r.arrival)}
               </td>
-              <td>[{r.lo}, {r.hi}]</td>
+              <td>[{fmt(r.lo)}, {fmt(r.hi)}]</td>
               <td className="num">
                 <span
-                  className={r.margin === 0 ? "margin-zero" : "margin-ok"}
+                  className={isZero(r.margin) ? "margin-zero" : "margin-ok"}
                   data-leaf-margin={r.node}
                 >
-                  {r.margin}
+                  {fmt(r.margin)}
                   <small>
                     {" "}
-                    (下界 +{r.margin_low} / 上界 −{r.margin_high})
+                    (下界 +{fmt(r.margin_low)} / 上界 −{fmt(r.margin_high)})
                   </small>
                 </span>
               </td>
               <td>
-                [{r.reachable_low}, {r.reachable_high}]
+                [{fmt(r.reachable_low)}, {fmt(r.reachable_high)}]
               </td>
             </tr>
           ))}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { solveBatch, fetchHealth } from "./api";
+import { parseJson, stringifyJson } from "./json";
 import { SAMPLES, type Batch, type SolveResult } from "./types";
 import { TreeTable } from "./components/TreeTable";
 import { EdgeTable } from "./components/EdgeTable";
@@ -11,7 +12,7 @@ const STORAGE_KEY = "clocktree-audit-input-v1";
 export default function App() {
   const [input, setInput] = useState<string>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ?? JSON.stringify(SAMPLES.sharedUpstream, null, 2);
+    return saved ?? stringifyJson(SAMPLES.sharedUpstream, 2);
   });
   const [result, setResult] = useState<SolveResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +43,8 @@ export default function App() {
     setError(null);
     let batch: Batch;
     try {
-      batch = JSON.parse(input) as Batch;
+      // Lossless parse: big integer delays/windows stay exact (BigInt).
+      batch = parseJson(input) as Batch;
     } catch (e) {
       // Input is deliberately kept verbatim in the textarea.
       setError(`JSON 解析失败, 输入已保留: ${(e as Error).message}`);
@@ -64,7 +66,7 @@ export default function App() {
   }
 
   function loadSample(name: keyof typeof SAMPLES) {
-    setInput(JSON.stringify(SAMPLES[name], null, 2));
+    setInput(stringifyJson(SAMPLES[name], 2));
     setError(null);
   }
 
@@ -115,7 +117,7 @@ export default function App() {
             type="button"
             onClick={() => {
               try {
-                setInput(JSON.stringify(JSON.parse(input), null, 2));
+                setInput(stringifyJson(parseJson(input), 2));
                 setError(null);
               } catch (e) {
                 setError(`JSON 解析失败, 无法格式化: ${(e as Error).message}`);

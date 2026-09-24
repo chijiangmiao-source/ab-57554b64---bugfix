@@ -146,6 +146,56 @@ def scenario_validation() -> None:
     check("负延迟/缺窗口返回 422", r.status_code == 422, f"got {r.status_code}")
 
 
+BIG = "9007199254740993"  # 2^53 + 1: beyond JavaScript's safe integers
+
+
+def scenario_big_integers() -> None:
+    print("E. 大整数（超出 JS 安全整数）在真实 API 上精确往返")
+    # The regression batch: R -> L1 (delay/window = 2^53+1), R -> L2 (zeros).
+    body = (
+        '{"nodes": ["R", "L1", "L2"],'
+        ' "edges": ['
+        f'  {{"id": "a", "source": "R", "target": "L1", "delay": {BIG}, "cap": 0}},'
+        '   {"id": "b", "source": "R", "target": "L2", "delay": 0, "cap": 0}],'
+        ' "windows": ['
+        f'  {{"node": "L1", "lo": {BIG}, "hi": {BIG}}},'
+        '   {"node": "L2", "lo": 0, "hi": 0}]}'
+    )
+    r = httpx.post(
+        f"{API}/api/v1/solve",
+        content=body,
+        headers={"Content-Type": "application/json"},
+        timeout=30,
+    )
+    check("大整数批次被接受 (200)", r.status_code == 200, f"got {r.status_code}: {r.text[:200]}")
+    if r.status_code != 200:
+        return
+    check("响应线格式含精确大整数（未改写为 9007199254740992）",
+          BIG in r.text and "9007199254740992" not in r.text, r.text[:300])
+    data = r.json()
+    check("status=feasible", data["status"] == "feasible",
+          (data.get("conflict") or {}).get("message", ""))
+    if data["status"] != "feasible":
+        return
+    big = int(BIG)
+    arrivals = {x["node"]: x["arrival"] for x in data["leaves"]}
+    check("L1 到达值恰为 9007199254740993", arrivals.get("L1") == big, str(arrivals))
+    check("L2 到达值为 0", arrivals.get("L2") == 0, str(arrivals))
+    leaf = {x["node"]: x for x in data["leaves"]}["L1"]
+    check("L1 窗口端点精确回显",
+          (leaf["lo"], leaf["hi"]) == (big, big), str(leaf))
+    check("L1 可达区间端点精确",
+          (leaf["reachable_low"], leaf["reachable_high"]) == (big, big), str(leaf))
+    edge = {x["id"]: x for x in data["edges"]}["a"]
+    check("边 a 固有延迟精确回显", edge["delay"] == big, str(edge))
+    tree = {x["node"]: x for x in data["tree"]["rows"]}
+    check("树表 L1 行到达值/入边延迟精确",
+          tree["L1"]["arrival"] == big and tree["L1"]["edge_delay"] == big,
+          str(tree["L1"]))
+    check("树表 L1 窗口精确",
+          (tree["L1"]["window"]["lo"], tree["L1"]["window"]["hi"]) == (big, big))
+
+
 def main() -> int:
     print(f"核对真实 API: {API}")
     h = httpx.get(f"{API}/health", timeout=10)
@@ -155,6 +205,7 @@ def main() -> int:
     scenario_ranges()
     scenario_conflict()
     scenario_validation()
+    scenario_big_integers()
     print(f"\nAPI 核对: {len(FAILURES)} 项失败")
     return 1 if FAILURES else 0
 
