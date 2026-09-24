@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -15,6 +16,10 @@ import httpx
 
 API = os.environ.get("API_URL", "http://api:8000").rstrip("/")
 FAILURES: list[str] = []
+
+BIG = 9007199254740993  # 2^53 + 1: a double would silently round this to ...992
+BIG_TEXT = str(BIG)
+ROUNDED_TEXT = "9007199254740992"
 
 
 def check(name: str, cond: bool, detail: str = "") -> None:
@@ -146,6 +151,74 @@ def scenario_validation() -> None:
     check("负延迟/缺窗口返回 422", r.status_code == 422, f"got {r.status_code}")
 
 
+def big_batch() -> dict:
+    # R -> L1 (delay BIG, cap 0), R -> L2 (all zero); windows closed points
+    # at BIG and 0 respectively. Feasible only with zero compensation, and it
+    # exercises every integer channel: delay, window lo/hi, arrival, margins,
+    # reachable endpoints.
+    return {
+        "nodes": ["R", "L1", "L2"],
+        "edges": [
+            {"id": "e1", "source": "R", "target": "L1", "delay": BIG, "cap": 0},
+            {"id": "e2", "source": "R", "target": "L2", "delay": 0, "cap": 0},
+        ],
+        "windows": [
+            {"node": "L1", "lo": BIG, "hi": BIG},
+            {"node": "L2", "lo": 0, "hi": 0},
+        ],
+    }
+
+
+def scenario_big_integer() -> None:
+    print("E. 超出 JS 安全整数范围的合法批次（真实 API 无损往返）")
+    # Post RAW JSON text: httpx json= would itself be exact in Python, but
+    # going through content= mirrors the browser wire body literally.
+    raw = json.dumps(big_batch())
+    assert BIG_TEXT in raw and ROUNDED_TEXT not in raw
+    r = httpx.post(
+        f"{API}/api/v1/solve",
+        content=raw,
+        headers={"Content-Type": "application/json"},
+        timeout=30,
+    )
+    check("大整数批次返回 200（不作为非法输入拒绝）", r.status_code == 200,
+          f"got {r.status_code}: {r.text}")
+    if r.status_code != 200:
+        return
+    check("响应原文包含精确十进制且不含取整邻居",
+          BIG_TEXT in r.text and ROUNDED_TEXT not in r.text)
+    b = r.json()
+    check("status=feasible", b["status"] == "feasible", str(b.get("conflict")))
+    if b["status"] != "feasible":
+        return
+    leaf = {x["node"]: x for x in b["leaves"]}
+    check("L1 到达值精确为 9007199254740993", leaf["L1"]["arrival"] == BIG,
+          str(leaf["L1"]["arrival"]))
+    check("L1 窗口与可达端点保持精确",
+          (leaf["L1"]["lo"], leaf["L1"]["hi"],
+           leaf["L1"]["reachable_low"], leaf["L1"]["reachable_high"])
+          == (BIG, BIG, BIG, BIG), str(leaf["L1"]))
+    check("L1 三边裕量均为 0",
+          (leaf["L1"]["margin"], leaf["L1"]["margin_low"],
+           leaf["L1"]["margin_high"]) == (0, 0, 0))
+    check("L2 普通 0 值行为不变",
+          leaf["L2"]["arrival"] == 0 and leaf["L2"]["reachable_low"] == 0)
+    tree = {x["node"]: x for x in b["tree"]["rows"]}
+    check("树表 L1 固有延迟/到达/窗口均为精确大整数",
+          tree["L1"]["edge_delay"] == BIG and tree["L1"]["arrival"] == BIG
+          and tree["L1"]["window"] == {"lo": BIG, "hi": BIG},
+          str(tree["L1"]))
+    edge = {x["id"]: x for x in b["edges"]}
+    check("边表 e1 延迟保持精确、采用/同优范围仍为 0",
+          edge["e1"]["delay"] == BIG and edge["e1"]["chosen"] == 0
+          and edge["e1"]["min"] == 0 and edge["e1"]["max"] == 0,
+          str(edge["e1"]))
+    check("目标值仍为普通小整数",
+          b["objectives"]["positive_edges"] == 0
+          and b["objectives"]["total_compensation"] == 0
+          and b["objectives"]["vector"] == [0, 0])
+
+
 def main() -> int:
     print(f"核对真实 API: {API}")
     h = httpx.get(f"{API}/health", timeout=10)
@@ -155,6 +228,7 @@ def main() -> int:
     scenario_ranges()
     scenario_conflict()
     scenario_validation()
+    scenario_big_integer()
     print(f"\nAPI 核对: {len(FAILURES)} 项失败")
     return 1 if FAILURES else 0
 

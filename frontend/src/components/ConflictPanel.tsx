@@ -1,4 +1,5 @@
 import type { ConflictLeaf } from "../types";
+import { fmtInt } from "../bigjson";
 
 export function ConflictPanel({
   conflict,
@@ -24,9 +25,9 @@ export function ConflictPanel({
                 <td>
                   <code>{c.node}</code>
                 </td>
-                <td>[{c.lo}, {c.hi}]</td>
+                <td>[{fmtInt(c.lo)}, {fmtInt(c.hi)}]</td>
                 <td>
-                  [{c.reachable_low}, {c.reachable_high}]
+                  [{fmtInt(c.reachable_low)}, {fmtInt(c.reachable_high)}]
                 </td>
               </tr>
             ))}

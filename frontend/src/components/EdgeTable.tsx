@@ -1,4 +1,5 @@
 import type { EdgeRow } from "../types";
+import { fmtInt } from "../bigjson";
 
 export function EdgeTable({ rows }: { rows: EdgeRow[] }) {
   return (
@@ -25,16 +26,16 @@ export function EdgeTable({ rows }: { rows: EdgeRow[] }) {
               <td>
                 {r.source} → {r.target}
               </td>
-              <td className="num">{r.delay}</td>
-              <td className="num">{r.cap}</td>
+              <td className="num">{fmtInt(r.delay)}</td>
+              <td className="num">{fmtInt(r.cap)}</td>
               <td className="num strong" data-chosen={r.id}>
-                {r.chosen}
+                {fmtInt(r.chosen)}
               </td>
               <td className="num" data-min={r.id}>
-                {r.min}
+                {fmtInt(r.min)}
               </td>
               <td className="num" data-max={r.id}>
-                {r.max}
+                {fmtInt(r.max)}
               </td>
               <td>{r.adjustable ? "是" : "否（固定 0）"}</td>
             </tr>

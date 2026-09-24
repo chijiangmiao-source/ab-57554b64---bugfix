@@ -17,11 +17,20 @@ const API = process.env.API_URL ?? "http://api:8000";
 const BUNDLE =
   process.env.VERIFY_BUNDLE ?? "/workspace/frontend/dist/verify-bundle.js";
 
+// 2^53 + 1: a legal integer that an IEEE-754 double would silently turn into
+// the neighbor ...992. This must survive both page directions verbatim.
+const BIG_TEXT = "9007199254740993";
+const ROUNDED_TEXT = "9007199254740992";
+
 let failures = 0;
 function check(name, cond, detail = "") {
   console.log(`  [${cond ? "PASS" : "FAIL"}] ${name}${!cond && detail ? ` — ${detail}` : ""}`);
   if (!cond) failures++;
 }
+
+// Every same-origin fetch the app issues while the page is driven, captured
+// at the wire (after stringifyJsonLossless), as `{ url, body }`.
+const wireRequests = [];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -56,8 +65,15 @@ async function bootDom() {
     pretendToBeVisual: true,
     beforeParse(window) {
       // Same-origin browser fetch routed through Node's real fetch -> nginx.
-      window.fetch = (url, init) =>
-        globalThis.fetch(new URL(url, WEB).toString(), init);
+      // Capture POST bodies so request-direction losslessness is asserted on
+      // the exact bytes the page puts on the wire.
+      window.fetch = (url, init) => {
+        const full = new URL(url, WEB).toString();
+        if (init?.method === "POST" && typeof init?.body === "string") {
+          wireRequests.push({ url: full, body: init.body });
+        }
+        return globalThis.fetch(full, init);
+      };
     },
   });
   const { window } = dom;
@@ -166,6 +182,83 @@ async function main() {
     l1?.includes("[2,2]") && l1?.includes("[0,16]"), l1);
   check("冲突面板列出 L2：要求 [8,8]、可达 [0,16]",
     l2?.includes("[8,8]") && l2?.includes("[0,16]"), l2);
+
+  // ---- E. legal big integers beyond Number.MAX_SAFE_INTEGER -------------
+  console.log("E. 合法大整数经真实提交路径无损往返（请求与响应两个方向）");
+  const bigBatch = `{
+  "nodes": ["R", "L1", "L2"],
+  "edges": [
+    {"id": "e1", "source": "R", "target": "L1", "delay": ${BIG_TEXT}, "cap": 0},
+    {"id": "e2", "source": "R", "target": "L2", "delay": 0, "cap": 0}
+  ],
+  "windows": [
+    {"node": "L1", "lo": ${BIG_TEXT}, "hi": ${BIG_TEXT}},
+    {"node": "L2", "lo": 0, "hi": 0}
+  ]
+}`;
+  const textareaBig = $(w, '[data-testid="batch-input"]');
+  const setterBig = Object.getOwnPropertyDescriptor(
+    w.HTMLTextAreaElement.prototype, "value"
+  ).set;
+  setterBig.call(textareaBig, bigBatch);
+  textareaBig.dispatchEvent(new w.Event("input", { bubbles: true }));
+  wireRequests.length = 0;
+  $(w, '[data-testid="submit"]').click();
+  await waitFor(() => $(w, '[data-leaf-row="L1"]'), {
+    timeout: 20000,
+    label: "叶端表 L1 行",
+  });
+  // Give the exact decimal a short grace period; a shifted ...992 must still
+  // fail the checks below with detail rather than ending in a bare timeout.
+  await sleep(100);
+
+  // Request direction: exact bytes sent through the real nginx -> API path.
+  const solveReq = wireRequests.find((r) => r.url.includes("/api/v1/solve"));
+  check("请求体原样携带 9007199254740993（不被改写成 …992）",
+    !!solveReq && solveReq.body.includes(BIG_TEXT)
+      && !solveReq.body.includes(ROUNDED_TEXT),
+    solveReq?.body);
+  check("大整数批次未被当作非法输入拒绝（无 422 横幅）",
+    !($(w, '[data-testid="error-banner"]')?.textContent.includes("422") ?? false),
+    $(w, '[data-testid="error-banner"]')?.textContent);
+
+  // Response direction: leaf table.
+  check("叶端表 L1 到达值精确显示 9007199254740993（非相邻的 …992）",
+    $(w, '[data-leaf-arrival="L1"]')?.textContent.trim() === BIG_TEXT,
+    $(w, '[data-leaf-arrival="L1"]')?.textContent);
+  const leafL1 = $(w, 'tr[data-leaf-row="L1"]')?.textContent.replace(/\s+/g, "");
+  check("叶端表 L1 要求窗口与可达区间均为精确大整数",
+    leafL1?.includes(`[${BIG_TEXT},${BIG_TEXT}]`)
+      && !leafL1.includes(ROUNDED_TEXT), leafL1);
+  check("叶端表 L1 三边裕量仍为 0",
+    $(w, '[data-leaf-margin="L1"]')?.textContent.replace(/\s+/g, "")
+      === "0(下界+0/上界−0)");
+  check("叶端表 L2 普通零值批次行为不变（到达 0、区间 [0,0]）",
+    $(w, '[data-leaf-arrival="L2"]')?.textContent.trim() === "0"
+      && $(w, 'tr[data-leaf-row="L2"]')?.textContent
+        .replace(/\s+/g, "").includes("[0,0]"));
+
+  // Response direction: tree table + edge table + objectives.
+  check("树表 L1 固有延迟/到达/窗口保持精确大整数",
+    $(w, '[data-arrival="L1"]')?.textContent.trim() === BIG_TEXT
+      && $(w, 'tr[data-node="L1"]')?.textContent
+        .replace(/\s+/g, "").includes(`[${BIG_TEXT},${BIG_TEXT}]`)
+      && !$(w, 'tr[data-node="L1"]')?.textContent.includes(ROUNDED_TEXT),
+    $(w, 'tr[data-node="L1"]')?.textContent);
+  check("树表 L2 到达 0",
+    $(w, '[data-arrival="L2"]')?.textContent.trim() === "0");
+  const edgeE1 = $(w, 'tr[data-edge="e1"]')?.textContent.replace(/\s+/g, "");
+  check("边表 e1 固有延迟精确、采用/同优范围保持 0",
+    edgeE1?.includes(BIG_TEXT) && !edgeE1.includes(ROUNDED_TEXT)
+      && $(w, '[data-chosen="e1"]')?.textContent.trim() === "0"
+      && $(w, '[data-min="e1"]')?.textContent.trim() === "0"
+      && $(w, '[data-max="e1"]')?.textContent.trim() === "0",
+    edgeE1);
+  check("目标摘要仍为普通小整数（正边 0、总加量 0）",
+    $(w, '[data-testid="objectives"]')?.textContent.includes("0")
+      && $(w, '[data-testid="vector"]')?.textContent.replace(/\s+/g, "")
+        .includes("(e1,e2)=(0,0)"),
+    $(w, '[data-testid="vector"]')?.textContent);
 
   // ---- D. failed validation must preserve the input ---------------------
   console.log("D. 校验/请求失败后页面保留输入");

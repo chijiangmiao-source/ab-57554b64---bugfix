@@ -58,6 +58,13 @@ frontend_build() {
 }
 run_stage "前端生产构建 (vite build + 验证包)" frontend_build
 
+# 2b. frontend code tests: lossless parse/stringify plus both directions of
+# the real solveBatch boundary (request submission + response display).
+frontend_unit() {
+  cd "$ROOT/frontend" && npm test
+}
+run_stage "前端代码测试 (大整数无损请求/响应)" frontend_unit
+
 # Services must be up before smoke/scenario stages.
 wait_for "$API_URL/health" || exit 1
 wait_for "$WEB_URL/" || exit 1

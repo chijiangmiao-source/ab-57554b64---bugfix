@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { solveBatch, fetchHealth } from "./api";
+import { fmtInt, parseJsonLossless, stringifyJsonLossless } from "./bigjson";
 import { SAMPLES, type Batch, type SolveResult } from "./types";
 import { TreeTable } from "./components/TreeTable";
 import { EdgeTable } from "./components/EdgeTable";
@@ -11,7 +12,7 @@ const STORAGE_KEY = "clocktree-audit-input-v1";
 export default function App() {
   const [input, setInput] = useState<string>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ?? JSON.stringify(SAMPLES.sharedUpstream, null, 2);
+    return saved ?? stringifyJsonLossless(SAMPLES.sharedUpstream, 2);
   });
   const [result, setResult] = useState<SolveResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +43,7 @@ export default function App() {
     setError(null);
     let batch: Batch;
     try {
-      batch = JSON.parse(input) as Batch;
+      batch = parseJsonLossless(input) as Batch;
     } catch (e) {
       // Input is deliberately kept verbatim in the textarea.
       setError(`JSON 解析失败, 输入已保留: ${(e as Error).message}`);
@@ -64,7 +65,7 @@ export default function App() {
   }
 
   function loadSample(name: keyof typeof SAMPLES) {
-    setInput(JSON.stringify(SAMPLES[name], null, 2));
+    setInput(stringifyJsonLossless(SAMPLES[name], 2));
     setError(null);
   }
 
@@ -115,7 +116,9 @@ export default function App() {
             type="button"
             onClick={() => {
               try {
-                setInput(JSON.stringify(JSON.parse(input), null, 2));
+                setInput(
+                  stringifyJsonLossless(parseJsonLossless(input), 2)
+                );
                 setError(null);
               } catch (e) {
                 setError(`JSON 解析失败, 无法格式化: ${(e as Error).message}`);
@@ -143,7 +146,7 @@ export default function App() {
           </div>
           <div>
             <span className="obj-label">总加量（第二级）</span>
-            <strong>{result.objectives.total_compensation}</strong>
+            <strong>{fmtInt(result.objectives.total_compensation)}</strong>
           </div>
           <div className="vector-cell">
             <span className="obj-label">
@@ -151,7 +154,7 @@ export default function App() {
             </span>
             <code data-testid="vector">
               ({result.objectives.vector_order.join(", ")}) = (
-              {result.objectives.vector.join(", ")})
+              {result.objectives.vector.map((v) => fmtInt(v)).join(", ")})
             </code>
           </div>
         </section>

@@ -1,4 +1,5 @@
 import type { Batch, SolveResult } from "./types";
+import { parseJsonLossless, stringifyJsonLossless } from "./bigjson";
 
 // Configurable endpoint. Empty means same-origin (nginx proxy in compose).
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -13,7 +14,9 @@ export async function solveBatch(batch: Batch): Promise<SolveResult> {
   const r = await fetch(`${API_BASE}/api/v1/solve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(batch),
+    // Lossless: bigint fields (delays/window endpoints beyond 2^53) must be
+    // emitted verbatim instead of being rounded through JSON.stringify.
+    body: stringifyJsonLossless(batch),
   });
   if (r.status === 422) {
     const body = await r.json().catch(() => ({}));
@@ -27,5 +30,7 @@ export async function solveBatch(batch: Batch): Promise<SolveResult> {
     const text = await r.text().catch(() => "");
     throw new Error(`请求失败 (HTTP ${r.status}) ${text}`);
   }
-  return r.json();
+  // Parse the response text without precision loss: arrivals/delays/windows
+  // may be integers beyond Number.MAX_SAFE_INTEGER.
+  return parseJsonLossless(await r.text()) as SolveResult;
 }

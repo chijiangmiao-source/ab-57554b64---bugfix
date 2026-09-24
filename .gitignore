@@ -12,3 +12,6 @@ __pycache__/
 *.pyo
 dist/
 .npm-cache/
+
+# esbuild-generated frontend code-test bundle
+dist-tests/

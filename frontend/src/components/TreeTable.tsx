@@ -1,4 +1,5 @@
 import type { TreeRow } from "../types";
+import { fmtInt, isZero } from "../bigjson";
 
 export function TreeTable({ rows }: { rows: TreeRow[] }) {
   return (
@@ -35,26 +36,28 @@ export function TreeTable({ rows }: { rows: TreeRow[] }) {
                 {r.is_leaf && <em className="tag">叶</em>}
               </td>
               <td>{r.parent_edge ?? "—"}</td>
-              <td>{r.edge_delay ?? "—"}</td>
-              <td>{r.edge_cap ?? "—"}</td>
+              <td>{fmtInt(r.edge_delay)}</td>
+              <td>{fmtInt(r.edge_cap)}</td>
               <td className="num">
-                {r.compensation === null ? "—" : r.compensation}
+                {r.compensation === null ? "—" : fmtInt(r.compensation)}
               </td>
               <td className="num strong" data-arrival={r.node}>
-                {r.arrival}
+                {fmtInt(r.arrival)}
               </td>
               <td>
-                {r.window ? `[${r.window.lo}, ${r.window.hi}]` : "—"}
+                {r.window
+                  ? `[${fmtInt(r.window.lo)}, ${fmtInt(r.window.hi)}]`
+                  : "—"}
               </td>
               <td className="num">
                 {r.margin === null ? (
                   "—"
                 ) : (
-                  <span className={r.margin === 0 ? "margin-zero" : "margin-ok"}>
-                    {r.margin}
+                  <span className={isZero(r.margin) ? "margin-zero" : "margin-ok"}>
+                    {fmtInt(r.margin)}
                     <small>
                       {" "}
-                      (下界 +{r.margin_low}, 上界 −{r.margin_high})
+                      (下界 +{fmtInt(r.margin_low)}, 上界 −{fmtInt(r.margin_high)})
                     </small>
                   </span>
                 )}
